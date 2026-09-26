@@ -1,8 +1,8 @@
 # llama-ui
 
-[![version](https://img.shields.io/badge/version-0.1.0--alpha.1-orange)](https://github.com/King-hsw/llama-ui/releases)
+[![version](https://img.shields.io/badge/version-0.1.0--alpha.3-orange)](https://github.com/King-hsw/llama-ui/releases)
 [![platform](https://img.shields.io/badge/platform-Windows%20x64-blue)](https://github.com/King-hsw/llama-ui/releases)
-[![build](https://github.com/King-hsw/llama-ui/actions/workflows/build-windows.yml/badge.svg)](https://github.com/King-hsw/llama-ui/actions/workflows/build-windows.yml)
+[![build](https://github.com/King-hsw/llama-ui/actions/workflows/release.yml/badge.svg)](https://github.com/King-hsw/llama-ui/actions/workflows/release.yml)
 
 **llama.cpp 可视化启动器** —— 一个纯启动器，不是聊天界面。
 
@@ -12,6 +12,7 @@
 
 ### 🖥️ 服务管理
 - 一键启动 / 停止 `llama-server`，展示运行状态、PID、端口、当前模型
+- **一键打开 WebUI**：服务运行中可直接在浏览器打开 llama-server 内置页面（监听 `0.0.0.0` / `::` 时自动改用 localhost 访问；启用 `--no-webui` 时禁用并提示）
 - 启动参数可视化配置，Rust 端拼装实际命令行
 - 实时日志流：后端事件推送 + 前端 250ms 批量缓冲，高吞吐日志不卡界面（上限 2000 行）
 
@@ -24,6 +25,7 @@
 - **硬件推荐**：自动探测本机 CPU / GPU，推荐匹配的后端版本
 - 应用启动时自动检查 llama.cpp 新版本，弹窗提示（每次启动仅一次，不打扰）
 - 双来源模式：`custom`（用户自备 llama.cpp 目录，只读）/ `managed`（托管下载，独占写入）
+- **应用自更新**：基于 tauri-plugin-updater，从 GitHub Releases 检查新版本，验签（minisign 公钥）后静默安装并自动重启，设置页可手动检查、查看更新进度
 
 ### ⚙️ 设置
 - 模型目录、下载镜像源配置
@@ -59,16 +61,16 @@ npm run tauri build
 
 ## 版本说明
 
-当前版本 `0.1.0-alpha.1`（semver 预发布）：功能已成型，但打包链路与安装体验尚未经充分验证，**不建议在生产环境依赖**。
+当前版本 `0.1.0-alpha.3`（semver 预发布）：功能已成型，但打包链路与安装体验尚未经充分验证，**不建议在生产环境依赖**。
 
-- 推送 `v*` tag 会触发 GitHub Actions 构建 NSIS 安装包并自动发布 Release（alpha 后缀自动标记为 pre-release）
+- 推送 `v*` tag 会触发 GitHub Actions 构建 NSIS 安装包与 updater 更新包（`latest.json` + 签名产物），自动发布 Release 并更新 `releases/latest` 端点，供应用内自动更新消费
 - 版本节奏：`alpha`（内部验证）→ `beta`（外部可测）→ `0.1.0`（首个正式版）
 
 ## Roadmap
 
 - [ ] 启动参数详尽覆盖 + 参数说明（对应 llama-server 全部命令行选项）
 - [ ] 多模型批量 / 切换优化
-- [ ] 应用内自动更新（Tauri updater，需签名密钥）
+- [x] ~~应用内自动更新~~（v0.1.0-alpha.2 已接入 tauri-plugin-updater）
 - [ ] 安装包代码签名（消除 SmartScreen 警告）
 
 ## 许可证
