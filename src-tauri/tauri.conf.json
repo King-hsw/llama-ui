@@ -23,9 +23,18 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdFRTQzNzkwOEIxNTczNkEKUldScWN4V0xrRGZrZmtYbk44dDdJQ05tNFk4SUxMUG5ZMDU5S1FDdk15SUFpZVRvWFRyOXJnZGsK",
+      "endpoints": [
+        "https://github.com/King-hsw/llama-ui/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

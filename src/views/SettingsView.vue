@@ -89,10 +89,34 @@
     <t-card title="关于">
       <t-space direction="vertical">
         <span>llama-ui — llama.cpp 可视化启动器 (Tauri 2 + Vue 3)</span>
+        <span class="mono">应用版本: v{{ version || "…" }}</span>
         <span class="mono">
           程序来源: {{ sourceLabel }}{{ settings.exe_source === "managed" ? ` · ${settings.current_tag || "未安装"}` : "" }}
         </span>
         <span class="mono">数据目录: {{ dataDir }}</span>
+
+        <t-space>
+          <t-button variant="outline" :loading="checking" @click="onCheckAppUpdate">
+            检查应用更新
+          </t-button>
+          <t-button v-if="available && !downloading" theme="primary" @click="onInstallAppUpdate">
+            更新到 v{{ newVersion }}
+          </t-button>
+        </t-space>
+
+        <t-alert v-if="available && !downloading" theme="info">
+          <template #message>
+            发现新版本 v{{ newVersion }}{{ notes ? `：${notes}` : "" }}。
+            更新包来自 GitHub Releases 并经签名验证，安装后应用会自动重启。
+          </template>
+        </t-alert>
+
+        <t-progress
+          v-if="downloading"
+          theme="line"
+          :percentage="totalMb > 0 ? Math.round((downloadedMb / totalMb) * 100) : 0"
+          :label="`正在下载更新… ${downloadedMb.toFixed(1)} / ${totalMb > 0 ? totalMb.toFixed(1) + ' MB' : '?'}`"
+        />
       </t-space>
     </t-card>
   </div>
@@ -102,9 +126,51 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { MessagePlugin } from "tdesign-vue-next";
+import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { appStore, type Settings } from "../composables/server";
 import { runUpdateCheck } from "../composables/update";
+import { useAppUpdate } from "../composables/appUpdate";
+
+const {
+  checking,
+  downloading,
+  version,
+  available,
+  newVersion,
+  notes,
+  downloadedMb,
+  totalMb,
+  init: initAppUpdate,
+  checkForUpdate,
+  install: installAppUpdate,
+} = useAppUpdate();
+
+/** 手动检查应用自更新（区别于上方 llama.cpp 的更新检查） */
+async function onCheckAppUpdate() {
+  try {
+    const has = await checkForUpdate();
+    if (has) {
+      MessagePlugin.info(`发现新版本 v${newVersion.value}`);
+    } else {
+      MessagePlugin.success("当前已是最新版本");
+    }
+  } catch (e) {
+    MessagePlugin.error(`检查更新失败: ${e}`);
+  }
+}
+
+/** 下载并静默安装，完成后自动重启 */
+function onInstallAppUpdate() {
+  const confirm = DialogPlugin.confirm({
+    header: "应用更新",
+    body: `将下载并静默安装 v${newVersion.value}，完成后应用会自动重启（llama-server 会被终止），确认继续？`,
+    confirmBtn: "立即更新",
+    onConfirm: () => {
+      confirm.destroy();
+      installAppUpdate().catch((e) => MessagePlugin.error(`更新失败: ${e}`));
+    },
+  });
+}
 
 const settings = reactive<Settings>({
   install_dir: "",
@@ -187,5 +253,6 @@ onMounted(async () => {
   Object.assign(settings, s);
   appStore.settings = { ...s };
   dataDir.value = await invoke("get_data_dir");
+  initAppUpdate().catch(() => {});
 });
 </script>

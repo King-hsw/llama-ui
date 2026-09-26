@@ -1,21 +1,20 @@
-name: Build Windows Installer
+name: Release
 
+# 推送 v* 标签时：构建 → 签名 → 发布 Release（含 latest.json，供应用内自动更新）
+# 也可在 Actions 页面手动触发（workflow_dispatch），用当前代码验证构建流程
 on:
-  # 推送 v* 标签时：构建 + 自动发布 Release
   push:
     tags:
       - "v*"
-  # 手动触发：Actions 页面点 Run workflow，用于日常验证构建
   workflow_dispatch:
 
 permissions:
-  contents: write # 发布 Release 需要
+  contents: write # 创建 Release 需要
 
 jobs:
-  build-windows:
-    name: Build NSIS installer (x64)
+  publish:
+    name: Build & publish (Windows x64)
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,26 +61,17 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build Tauri app
-        run: npm run tauri build
-
-      # NSIS 安装包 + 绿色版 exe 一起归档
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+      # tauri-action 一条龙：构建（读取 TAURI_SIGNING_PRIVATE_KEY 对更新包签名，
+      # bundle.createUpdaterArtifacts 开启后产物含 .sig）→ 创建 GitHub Release
+      # → 上传安装包与 .sig → 生成并上传 latest.json（应用内 updater 的 endpoint）
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_KEY_PASSWORD }}
         with:
-          name: llama-ui-windows-x64
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/llama-ui.exe
-          if-no-files-found: error
-          retention-days: 14
-
-      # 仅 tag 触发时发布 GitHub Release
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            src-tauri/target/release/bundle/nsis/*.exe
-          generate_release_notes: true
-          draft: false
+          tagName: v__VERSION__
+          releaseName: "llama-ui v__VERSION__"
+          releaseBody: "在 Assets 中下载 llama-ui_x.y.z_x64-setup.exe 安装。应用内「设置 → 关于 → 检查应用更新」可自动更新（更新包经签名验证）。"
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
