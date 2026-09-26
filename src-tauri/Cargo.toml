@@ -1,6 +1,6 @@
 [package]
 name = "llama-ui"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 description = "llama.cpp 可视化启动器"
 edition = "2021"
 

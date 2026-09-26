@@ -1,6 +1,6 @@
 # llama-ui
 
-[![version](https://img.shields.io/badge/version-0.1.0--alpha.3-orange)](https://github.com/King-hsw/llama-ui/releases)
+[![version](https://img.shields.io/badge/version-0.1.0--alpha.4-orange)](https://github.com/King-hsw/llama-ui/releases)
 [![platform](https://img.shields.io/badge/platform-Windows%20x64-blue)](https://github.com/King-hsw/llama-ui/releases)
 [![build](https://github.com/King-hsw/llama-ui/actions/workflows/release.yml/badge.svg)](https://github.com/King-hsw/llama-ui/actions/workflows/release.yml)
 
@@ -15,6 +15,8 @@
 - **一键打开 WebUI**：服务运行中可直接在浏览器打开 llama-server 内置页面（监听 `0.0.0.0` / `::` 时自动改用 localhost 访问；启用 `--no-webui` 时禁用并提示）
 - 启动参数可视化配置，Rust 端拼装实际命令行
 - 实时日志流：后端事件推送 + 前端 250ms 批量缓冲，高吞吐日志不卡界面（上限 2000 行）
+- **运行状态面板**：接入 llama-server `/metrics` 端点，实时展示推理速度（输入 / 生成 TPS）、Token 统计、上下文与 KV 缓存用量、请求值 vs 实际生效配置对比、健康状态一览与最近 90 秒时间线；结构化解析日志，自动诊断 OOM、CUDA 错误、端口占用、上下文不足等问题
+- 稳定性：应用无论正常退出还是崩溃，都会通过 Windows Job Object 自动终止 `llama-server` 子进程，不留孤儿进程占用显存
 
 ### 📦 模型管理
 - 自动扫描模型目录，列出 GGUF 模型（名称 / 路径 / 大小）
@@ -38,7 +40,7 @@
 |----|------|
 | 前端 | Vue 3 + TypeScript + TDesign Vue Next + Vue Router（hash 模式） |
 | 桌面框架 | Tauri 2 |
-| 后端 | Rust（19 个 Tauri command：进程管理 / 文件扫描 / 硬件探测 / 下载 / 配置持久化） |
+| 后端 | Rust（20 个 Tauri command：进程管理 / 文件扫描 / 硬件探测 / 下载 / 运行时指标与诊断 / 配置持久化） |
 | 打包 | NSIS（简体中文安装向导），GitHub Actions 自动构建发布 |
 
 ## 开发
@@ -61,7 +63,7 @@ npm run tauri build
 
 ## 版本说明
 
-当前版本 `0.1.0-alpha.3`（semver 预发布）：功能已成型，但打包链路与安装体验尚未经充分验证，**不建议在生产环境依赖**。
+当前版本 `0.1.0-alpha.4`（semver 预发布）：功能已成型，但打包链路与安装体验尚未经充分验证，**不建议在生产环境依赖**。
 
 - 推送 `v*` tag 会触发 GitHub Actions 构建 NSIS 安装包与 updater 更新包（`latest.json` + 签名产物），自动发布 Release 并更新 `releases/latest` 端点，供应用内自动更新消费
 - 版本节奏：`alpha`（内部验证）→ `beta`（外部可测）→ `0.1.0`（首个正式版）
