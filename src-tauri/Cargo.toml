@@ -1,0 +1,33 @@
+[package]
+name = "llama-ui"
+version = "0.1.0"
+description = "llama.cpp 可视化启动器"
+edition = "2021"
+
+[lib]
+name = "llama_ui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# 强制启用 std，避免 indexmap 1.x build script 探测失败导致编译错误
+indexmap = { version = "1.9", features = ["std"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+zip = "2"
+shell-words = "1"
+# Windows Job Object：应用退出/崩溃时自动杀死 llama-server 子进程
+win32job = "2"
+# 强制启用 std，避免 indexmap 1.x build script 探测失败导致编译错误
+indexmap = { version = "1.9", features = ["std"] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
