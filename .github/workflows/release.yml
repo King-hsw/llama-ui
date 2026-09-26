@@ -74,4 +74,6 @@ jobs:
           releaseName: "llama-ui v__VERSION__"
           releaseBody: "在 Assets 中下载 llama-ui_x.y.z_x64-setup.exe 安装。应用内「设置 → 关于 → 检查应用更新」可自动更新（更新包经签名验证）。"
           releaseDraft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+          # 注意：必须为正式 release（prerelease/draft 不计入 releases/latest 端点，
+          # 否则应用内 updater 的 latest.json 会 404）。alpha/beta 版本号靠 semver 表达即可
+          prerelease: false
