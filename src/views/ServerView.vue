@@ -10,8 +10,17 @@
           PID {{ serverState.pid }}
         </t-tag>
         <t-tag v-if="serverState.running && serverState.port" variant="outline">
-          http://{{ cfg.host }}:{{ serverState.port }}
+          http://{{ displayHost }}:{{ serverState.port }}
         </t-tag>
+        <t-tooltip :content="cfg.noWebui ? '已通过 --no-webui 禁用内置 WebUI' : '在浏览器中打开 llama-server 内置页面'">
+          <t-button
+            variant="outline"
+            :disabled="!serverState.running || !serverState.port || cfg.noWebui"
+            @click="openWebui"
+          >
+            打开 WebUI
+          </t-button>
+        </t-tooltip>
         <t-button theme="primary" :disabled="serverState.running || !exePath" @click="start">
           启动服务
         </t-button>
@@ -523,6 +532,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { CopyIcon } from "tdesign-icons-vue-next";
 import {
   appStore,
@@ -601,6 +611,22 @@ function defaultCfg(): Record<string, any> {
 }
 
 const cfg = ref<any>(defaultCfg());
+
+/** 浏览器访问地址：0.0.0.0 / :: 是监听地址而非可访问地址，改用 localhost */
+const displayHost = computed(() => {
+  const h = String(cfg.value.host ?? "").trim();
+  return h === "0.0.0.0" || h === "::" ? "localhost" : h || "localhost";
+});
+
+async function openWebui() {
+  if (!serverState.running || !serverState.port) return;
+  const url = `http://${displayHost.value}:${serverState.port}`;
+  try {
+    await openUrl(url);
+  } catch (e) {
+    MessagePlugin.error("打开浏览器失败: " + String(e));
+  }
+}
 
 const models = ref<ModelInfo[]>([]);
 const exePath = ref<string>("");
