@@ -1,6 +1,9 @@
 name: Release
 
 # 推送 v* 标签时：构建 → 签名 → 发布 Release（含 latest.json，供应用内自动更新）
+# Release 正文取自附注 tag 的注释（git tag -a v1.2.3 -m "更新说明"）；
+# 注意 git 会丢弃 # 开头的行（默认注释符），说明文案行首不要用 #，
+# 轻量 tag / 手动触发时回退到默认说明
 # 也可在 Actions 页面手动触发（workflow_dispatch），用当前代码验证构建流程
 on:
   push:
@@ -55,6 +58,29 @@ jobs:
             fi
           fi
 
+      # 提取附注 tag 的注释作为 Release 正文（actions/checkout 默认不拉取 tag 对象，需显式 fetch）；
+      # 轻量 tag 或注释为空时回退默认说明，保证 Release 正文永不为空
+      - name: Extract release body from tag message
+        id: tagmsg
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          git fetch --force --no-tags origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          OBJTYPE=$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(objecttype)')
+          BODY=""
+          if [ "$OBJTYPE" = "tag" ]; then
+            # 剥离 PGP 签名块（若 tag 被签名），命令替换会同时去掉首尾空行
+            BODY=$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d')
+          fi
+          if [ -z "$BODY" ]; then
+            BODY="在 Assets 中下载 llama-ui_x.y.z_x64-setup.exe 安装。应用内「设置 → 关于 → 检查应用更新」可自动更新（更新包经签名验证）。"
+          fi
+          {
+            echo "body<<__RELEASE_BODY_EOF__"
+            printf '%s\n' "$BODY"
+            echo "__RELEASE_BODY_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -72,7 +98,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "llama-ui v__VERSION__"
-          releaseBody: "在 Assets 中下载 llama-ui_x.y.z_x64-setup.exe 安装。应用内「设置 → 关于 → 检查应用更新」可自动更新（更新包经签名验证）。"
+          releaseBody: ${{ steps.tagmsg.outputs.body || '在 Assets 中下载 llama-ui_x.y.z_x64-setup.exe 安装。应用内「设置 → 关于 → 检查应用更新」可自动更新（更新包经签名验证）。' }}
           releaseDraft: false
           # 注意：必须为正式 release（prerelease/draft 不计入 releases/latest 端点，
           # 否则应用内 updater 的 latest.json 会 404）。alpha/beta 版本号靠 semver 表达即可

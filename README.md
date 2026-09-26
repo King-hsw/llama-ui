@@ -67,6 +67,7 @@ npm run tauri build
 
 - **alpha.5**：TDesign 组件库由全量引入重构为按需引入（`unplugin-vue-components` + 组件级样式自动注入），前端产物 JS 约 -41%、CSS 约 -49%（gzip 后整体约 -34%），加载更快、安装包更小
 - 推送 `v*` tag 会触发 GitHub Actions 构建 NSIS 安装包与 updater 更新包（`latest.json` + 签名产物），自动发布 Release 并更新 `releases/latest` 端点，供应用内自动更新消费
+- **Release 正文取自附注 tag 的注释**：发版时使用 `git tag -a v0.1.0-alpha.6 -m "更新说明"` 打 tag，说明会原样写入 Release 页面（注意：git 会丢弃行首为 `#` 的行，文案请勿以 `#` 开头）；轻量 tag 则回退到默认说明
 - 版本节奏：`alpha`（内部验证）→ `beta`（外部可测）→ `0.1.0`（首个正式版）
 
 ## Roadmap
