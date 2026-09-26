@@ -4,12 +4,24 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+mod log_parser;
+mod metrics;
+mod runtime;
+
+use crate::log_parser::RuntimeDiagnostic;
+use runtime::{RuntimeShared, RuntimeUpdate};
+
+/// Metrics Collector 轮询间隔（1.5s，避免高频轮询影响 llama-server）
+const METRICS_INTERVAL_MS: u64 = 1500;
+/// Metrics 首次成功前的宽限期：超时仍未连通则标记 unavailable（而非永远 connecting）
+const METRICS_CONNECT_TIMEOUT_SECS: u64 = 120;
 
 // ---------- 设置持久化 ----------
 
@@ -1543,6 +1555,10 @@ struct AppState {
     running_cfg: Mutex<Option<ServerConfig>>,
     /// 下载取消标记：cancel_download 置位，下载线程在循环中轮询，结束后复位
     download_cancel: AtomicBool,
+    /// P0-1/P0-2/P0-3 统一 Runtime State（metrics + events + diagnostics + facts）
+    runtime: Mutex<RuntimeShared>,
+    /// Metrics Collector 停止标记：与 llama-server 生命周期绑定，stop_server 置位
+    metrics_stop: Arc<AtomicBool>,
 }
 
 fn push_log(app: &AppHandle, line: String) {
@@ -1554,7 +1570,35 @@ fn push_log(app: &AppHandle, line: String) {
         }
         logs.push_back(line.clone());
     }
-    let _ = app.emit("server-log", line);
+    let _ = app.emit("server-log", line.clone());
+
+    // ---- P0-3 Structured Log Parser ----
+    // Raw Log + Parsed Event 双轨：原始行已存入 logs 并经 server-log 下发，
+    // 此处额外产出结构化事件 / 运行事实 / 诊断。
+    let ev = log_parser::parse_line(&line);
+    let facts = log_parser::extract_facts(&line);
+    let requested_ctx = st.running_cfg.lock().unwrap().as_ref().map(|c| c.ctx_size);
+    let mut rt = st.runtime.lock().unwrap();
+    // 首次观察到 n_ctx 时做"生效上下文 < 请求上下文"诊断（只触发一次）
+    let ctx_first_seen = facts.n_ctx.is_some() && rt.facts.n_ctx.is_none();
+    log_parser::merge_facts(&mut rt.facts, facts);
+    if let Some(d) = log_parser::diagnose(&ev) {
+        rt.push_diagnostic(d);
+    }
+    if ctx_first_seen {
+        if let (Some(observed), Some(req)) = (rt.facts.n_ctx, requested_ctx) {
+            if req > 0 && (observed as u64) < req as u64 {
+                rt.push_diagnostic(RuntimeDiagnostic {
+                    timestamp_ms: ev.timestamp_ms,
+                    level: "warning".into(),
+                    category: "context".into(),
+                    message: format!("生效上下文长度（{observed}）小于请求值（{req}），模型或显存限制了实际可用上下文"),
+                    source: "log".into(),
+                });
+            }
+        }
+    }
+    rt.push_event(ev);
 }
 
 fn spawn_reader(app: AppHandle, stream: impl Read + Send + 'static) {
@@ -1616,6 +1660,175 @@ fn get_server_status(state: State<AppState>) -> ServerStatus {
 #[tauri::command]
 fn get_logs(state: State<AppState>) -> Vec<String> {
     state.logs.lock().unwrap().iter().cloned().collect()
+}
+
+// ---------- 统一 Runtime State（P0-1/P0-2/P0-3 聚合） ----------
+
+/// 构建运行时快照。all_events=true 时下发缓冲内全部事件（前端初次加载用），
+/// 否则只下发自上次推送以来的增量事件。
+fn build_runtime_update(app: &AppHandle, all_events: bool) -> RuntimeUpdate {
+    let st = app.state::<AppState>();
+    let server = status_of(&st);
+    let requested = st.running_cfg.lock().unwrap().clone();
+    let requested_val = serde_json::to_value(&requested).ok();
+    let context_requested = requested.as_ref().map(|c| c.ctx_size);
+    let mut rt = st.runtime.lock().unwrap();
+    let uptime_seconds = rt.started.map(|t| t.elapsed().as_secs());
+    let new_events: Vec<crate::log_parser::RuntimeEvent> = if all_events {
+        rt.emitted = rt.events.len();
+        rt.events.iter().cloned().collect()
+    } else {
+        let skip = rt.emitted.min(rt.events.len());
+        rt.emitted = rt.events.len();
+        rt.events.iter().skip(skip).cloned().collect()
+    };
+    RuntimeUpdate {
+        server,
+        uptime_seconds,
+        metrics_status: rt.metrics_status.clone(),
+        metrics_error: rt.metrics_error.clone(),
+        metrics: rt.metrics.clone(),
+        raw_metrics: rt.raw_metrics.clone(),
+        observed: rt.facts.clone(),
+        requested: requested_val,
+        context_requested,
+        new_events,
+        diagnostics: rt.diagnostics.iter().cloned().collect(),
+    }
+}
+
+/// 推送 runtime:updated 到前端（增量事件）
+fn push_runtime_update(app: &AppHandle) {
+    let _ = app.emit("runtime:updated", build_runtime_update(app, false));
+}
+
+/// P0-1 Metrics Collector：与 llama-server 生命周期绑定的后台轮询线程。
+///
+/// - 定时（1.5s）请求 http://<host>:<port>/metrics，解析并归一化进 RuntimeShared
+/// - Server 停止 / 子进程退出 → 发最终快照后退出线程（无后台死循环、无泄漏）
+/// - --metrics 未开启 → status=disabled，不发 HTTP 请求
+/// - 启动期连接失败 → status=connecting（模型加载中，Server 仍是 Running）；
+///   成功后再失败 → status=unavailable（Server 仍是 Running，Metrics 不可用不等于 Stopped）
+fn spawn_metrics_loop(app: AppHandle) {
+    let stop_flag = app.state::<AppState>().metrics_stop.clone();
+    stop_flag.store(false, Ordering::Relaxed);
+    thread::spawn(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build();
+        let loop_start = std::time::Instant::now();
+        let mut ever_ok = false;
+        loop {
+            if stop_flag.load(Ordering::Relaxed) {
+                return;
+            }
+            let st = app.state::<AppState>();
+            // 子进程存活检查：已退出则清状态、发最终快照并结束线程
+            let alive = {
+                let mut g = st.child.lock().unwrap();
+                let a = match g.as_mut() {
+                    Some(c) => c.try_wait().ok().flatten().is_none(),
+                    None => false,
+                };
+                if !a {
+                    *g = None;
+                }
+                a
+            };
+            if !alive {
+                let mut rt = st.runtime.lock().unwrap();
+                rt.started = None;
+                rt.metrics = None;
+                rt.raw_metrics.clear();
+                rt.metrics_status = "unavailable".into();
+                drop(rt);
+                push_runtime_update(&app);
+                return;
+            }
+            let cfg = st.running_cfg.lock().unwrap().clone();
+            drop(st);
+
+            if let Some(cfg) = cfg {
+                if cfg.metrics {
+                    // 监听地址映射：0.0.0.0/::/空 → 本机回环（监听地址 ≠ 访问地址）
+                    let host = match cfg.host.trim() {
+                        "0.0.0.0" | "" | "::" | "[::]" => "127.0.0.1",
+                        h => h,
+                    };
+                    let url = format!("http://{host}:{}/metrics", cfg.port);
+                    let result = match client.as_ref() {
+                        Ok(c) => {
+                            // --api-key 开启时 /metrics 同样受鉴权保护，必须带 Bearer token，
+                            // 否则每次轮询都会触发服务端 "unauthorized: Invalid API Key" 告警
+                            let mut req = c.get(&url);
+                            if let Some(key) = cfg
+                                .api_key
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                            {
+                                req = req.header(
+                                    reqwest::header::AUTHORIZATION,
+                                    format!("Bearer {key}"),
+                                );
+                            }
+                            match req.send() {
+                                Ok(resp) if resp.status().is_success() => resp
+                                    .text()
+                                    .map_err(|e| format!("读取响应失败: {e}")),
+                                Ok(resp) => Err(format!("HTTP {}", resp.status())),
+                                Err(_) => Err("连接失败（服务可能仍在加载模型）".into()),
+                            }
+                        }
+                        Err(e) => Err(format!("HTTP 客户端创建失败: {e}")),
+                    };
+                    let st = app.state::<AppState>();
+                    let mut rt = st.runtime.lock().unwrap();
+                    match result {
+                        Ok(text) => {
+                            let raw = metrics::parse_prometheus(&text);
+                            rt.metrics = Some(metrics::normalize(
+                                &raw,
+                                log_parser::now_ms(),
+                            ));
+                            rt.raw_metrics = raw;
+                            rt.metrics_status = "connected".into();
+                            rt.metrics_error = None;
+                            ever_ok = true;
+                        }
+                        Err(e) => {
+                            rt.metrics_status = if ever_ok {
+                                "unavailable".into()
+                            } else if loop_start.elapsed().as_secs() > METRICS_CONNECT_TIMEOUT_SECS {
+                                "unavailable".into()
+                            } else {
+                                "connecting".into()
+                            };
+                            rt.metrics_error = Some(e);
+                        }
+                    }
+                    drop(rt);
+                    drop(st);
+                } else {
+                    // --metrics 未开启：不发无谓请求
+                    let st = app.state::<AppState>();
+                    let mut rt = st.runtime.lock().unwrap();
+                    rt.metrics_status = "disabled".into();
+                    rt.metrics_error = None;
+                    drop(rt);
+                    drop(st);
+                }
+            }
+            push_runtime_update(&app);
+            thread::sleep(std::time::Duration::from_millis(METRICS_INTERVAL_MS));
+        }
+    });
+}
+
+/// 前端初次加载 / 手动刷新时全量拉取运行时状态
+#[tauri::command]
+fn get_runtime_state(app: AppHandle) -> RuntimeUpdate {
+    build_runtime_update(&app, true)
 }
 
 #[tauri::command]
@@ -1761,6 +1974,17 @@ fn start_server(app: AppHandle, state: State<AppState>, cfg: ServerConfig) -> Re
     *state.running_cfg.lock().unwrap() = Some(cfg.clone());
     *state.child.lock().unwrap() = Some(child);
 
+    // 重置本次运行的统一 Runtime State，并启动 Metrics Collector（生命周期绑定）
+    {
+        let mut rt = state.runtime.lock().unwrap();
+        *rt = RuntimeShared {
+            started: Some(std::time::Instant::now()),
+            metrics_status: if cfg.metrics { "connecting".into() } else { "disabled".into() },
+            ..Default::default()
+        };
+    }
+    spawn_metrics_loop(app.clone());
+
     let status = ServerStatus {
         running: true,
         pid: Some(pid),
@@ -1768,6 +1992,7 @@ fn start_server(app: AppHandle, state: State<AppState>, cfg: ServerConfig) -> Re
         port: Some(cfg.port),
     };
     let _ = app.emit("server-status", status.clone());
+    push_runtime_update(&app);
     Ok(status)
 }
 
@@ -1780,6 +2005,19 @@ fn stop_server(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     }
     *state.running_cfg.lock().unwrap() = None;
     drop(guard);
+
+    // 停止 Metrics Collector 并清理运行时状态（及时释放，不留后台轮询）
+    state.metrics_stop.store(true, Ordering::Relaxed);
+    {
+        let mut rt = state.runtime.lock().unwrap();
+        rt.started = None;
+        rt.metrics = None;
+        rt.raw_metrics.clear();
+        rt.metrics_status = "unavailable".into();
+        rt.metrics_error = None;
+        rt.emitted = 0;
+    }
+
     push_log(&app, "[llama-ui] 服务已停止".into());
     let _ = app.emit(
         "server-status",
@@ -1790,6 +2028,7 @@ fn stop_server(app: AppHandle, state: State<AppState>) -> Result<(), String> {
             port: None,
         },
     );
+    push_runtime_update(&app);
     Ok(())
 }
 
@@ -1820,7 +2059,8 @@ pub fn run() {
             save_profile,
             delete_profile,
             start_server,
-            stop_server
+            stop_server,
+            get_runtime_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -34,6 +34,15 @@
       </div>
     </t-card>
 
+    <!-- Runtime Dashboard：统一 Runtime State（metrics + 日志解析 + 诊断 + 系统资源对比） -->
+    <RuntimeDashboard
+      :stats="current"
+      :monitor-rows="monitorRows"
+      :baseline-locked="baselineLocked"
+      :gpu-hint="gpuHint"
+      @reset-baseline="captureBaseline(true)"
+    />
+
     <!-- 参数配置 + 命令预览 -->
     <div class="config-row mb-16">
       <t-card title="启动参数" class="config-card">
@@ -385,40 +394,6 @@
           </div>
         </t-card>
 
-        <!-- 运行监控：启动前后系统/进程资源对比 -->
-        <t-card title="运行监控" class="monitor-card">
-          <template #actions>
-            <t-space size="small" break-line>
-              <t-tag v-if="baselineLocked" theme="primary" variant="light" size="small">
-                基线已锁定
-              </t-tag>
-              <t-tag v-if="serverState.running" theme="success" variant="light" size="small">
-                采样中 · 每 1s
-              </t-tag>
-            </t-space>
-            <t-button
-              variant="text"
-              size="small"
-              :disabled="serverState.running"
-              @click="captureBaseline(true)"
-            >
-              重置基线
-            </t-button>
-          </template>
-          <div class="mon-grid mon-head">
-            <span>指标</span><span>启动前</span><span>当前</span><span>变化</span>
-          </div>
-          <div v-for="r in monitorRows" :key="r.label" class="mon-grid mon-row">
-            <span class="mon-label">{{ r.label }}</span>
-            <span>{{ r.before }}</span>
-            <span class="mon-now">{{ r.now }}</span>
-            <span :class="r.cls">{{ r.delta }}</span>
-          </div>
-          <div class="mon-meta">
-            每 1 秒刷新一次 · {{ gpuHint }}
-          </div>
-        </t-card>
-
         <!-- 本机配置信息 -->
         <t-card title="本机配置" class="sys-card">
           <div v-if="sysInfo" class="sys-list">
@@ -534,6 +509,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CopyIcon } from "tdesign-icons-vue-next";
+import RuntimeDashboard from "../components/RuntimeDashboard.vue";
 import {
   appStore,
   initServerListener,
@@ -541,6 +517,7 @@ import {
   type ModelInfo,
   type ResolvedExe,
 } from "../composables/server";
+import { initRuntimeListener } from "../composables/runtime";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 
 const kvTypes = ["f16", "bf16", "f32", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0"];
@@ -1475,6 +1452,7 @@ const gpuHint = computed(() => {
 
 onMounted(async () => {
   await initServerListener().catch((e) => MessagePlugin.error("初始化服务监听失败: " + String(e)));
+  await initRuntimeListener().catch((e) => MessagePlugin.error("初始化运行时监听失败: " + String(e)));
   // resolve_server_exe 返回 { path, source, tag, message }，按 exe_source 严格解析，
   // 两种场景零跨场景回退；失败时 message 含引导信息
   const resolved = await invoke<ResolvedExe>("resolve_server_exe").catch(() => null);
@@ -1577,41 +1555,6 @@ onMounted(async () => {
 .mono-val {
   font-family: Consolas, "Courier New", monospace;
   font-size: 12px;
-}
-
-/* 运行监控 */
-.mon-grid {
-  display: grid;
-  grid-template-columns: 96px 1fr 1fr 72px;
-  gap: 8px;
-  align-items: baseline;
-  font-size: 13px;
-}
-.mon-head {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder, #999);
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--td-component-stroke, #e7e7e7);
-}
-.mon-row + .mon-row {
-  margin-top: 8px;
-}
-.mon-label {
-  color: var(--td-text-color-secondary, #666);
-}
-.mon-now {
-  font-weight: 600;
-}
-.delta-up {
-  color: #d54941;
-}
-.delta-down {
-  color: #2ba471;
-}
-.mon-meta {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--td-text-color-placeholder, #999);
 }
 
 .dlg-hint {
