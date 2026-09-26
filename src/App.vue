@@ -108,8 +108,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", syncCollapsed);
 });
 
-function onMenu(value: string) {
-  router.push(value);
+function onMenu(value: string | number) {
+  router.push(String(value));
 }
 </script>
 

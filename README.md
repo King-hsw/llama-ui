@@ -1,6 +1,6 @@
 # llama-ui
 
-[![version](https://img.shields.io/badge/version-0.1.0--alpha.4-orange)](https://github.com/King-hsw/llama-ui/releases)
+[![version](https://img.shields.io/badge/version-0.1.0--alpha.5-orange)](https://github.com/King-hsw/llama-ui/releases)
 [![platform](https://img.shields.io/badge/platform-Windows%20x64-blue)](https://github.com/King-hsw/llama-ui/releases)
 [![build](https://github.com/King-hsw/llama-ui/actions/workflows/release.yml/badge.svg)](https://github.com/King-hsw/llama-ui/actions/workflows/release.yml)
 
@@ -38,7 +38,7 @@
 
 | 层 | 技术 |
 |----|------|
-| 前端 | Vue 3 + TypeScript + TDesign Vue Next + Vue Router（hash 模式） |
+| 前端 | Vue 3 + TypeScript + TDesign Vue Next（unplugin-vue-components 按需引入，组件与样式均按需打包） + Vue Router（hash 模式） |
 | 桌面框架 | Tauri 2 |
 | 后端 | Rust（20 个 Tauri command：进程管理 / 文件扫描 / 硬件探测 / 下载 / 运行时指标与诊断 / 配置持久化） |
 | 打包 | NSIS（简体中文安装向导），GitHub Actions 自动构建发布 |
@@ -63,8 +63,9 @@ npm run tauri build
 
 ## 版本说明
 
-当前版本 `0.1.0-alpha.4`（semver 预发布）：功能已成型，但打包链路与安装体验尚未经充分验证，**不建议在生产环境依赖**。
+当前版本 `0.1.0-alpha.5`（semver 预发布）：功能已成型，但打包链路与安装体验尚未经充分验证，**不建议在生产环境依赖**。
 
+- **alpha.5**：TDesign 组件库由全量引入重构为按需引入（`unplugin-vue-components` + 组件级样式自动注入），前端产物 JS 约 -41%、CSS 约 -49%（gzip 后整体约 -34%），加载更快、安装包更小
 - 推送 `v*` tag 会触发 GitHub Actions 构建 NSIS 安装包与 updater 更新包（`latest.json` + 签名产物），自动发布 Release 并更新 `releases/latest` 端点，供应用内自动更新消费
 - 版本节奏：`alpha`（内部验证）→ `beta`（外部可测）→ `0.1.0`（首个正式版）
 

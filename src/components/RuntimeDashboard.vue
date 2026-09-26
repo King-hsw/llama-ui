@@ -271,9 +271,15 @@ const uptimeDisplay = computed(() => {
 const metricsLabel = computed(
   () => ({ connected: "已连接", connecting: "等待中", unavailable: "不可用", disabled: "未开启" }[runtimeStore.metricsStatus] ?? runtimeStore.metricsStatus)
 );
-const metricsTheme = computed(() =>
-  ({ connected: "success", connecting: "warning", unavailable: "danger", disabled: "default" }[runtimeStore.metricsStatus] ?? "default")
-);
+const metricsTheme = computed<"success" | "warning" | "danger" | "default">(() => {
+  const map: Record<string, "success" | "warning" | "danger" | "default"> = {
+    connected: "success",
+    connecting: "warning",
+    unavailable: "danger",
+    disabled: "default",
+  };
+  return map[runtimeStore.metricsStatus] ?? "default";
+});
 
 // ---- 格式化 ----
 const fmtTps = (v?: number | null) => (v == null ? "—" : v >= 100 ? v.toFixed(0) : v.toFixed(1));
